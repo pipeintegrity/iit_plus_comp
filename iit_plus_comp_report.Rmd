@@ -4,19 +4,20 @@ author: "RSI PIpeline Solutions"
 date: "`r format(Sys.time(), '%d %B, %Y')`" 
 
 output: bookdown::word_document2
+
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
 ```
 
-## Introduction  {-}
+## Introduction {-}
 The purpose of this document is to compare the yield strength predictions using Instrumented Indentation Testing (IIT) by itself with IIT combined with composition elements as additional predictors. IIT works by making repeated measurements of the force and displacement of a indenter on the surface of the pipe to arrive at a stress - strain relationship for the steel and calculate a yield and ultimate strength. But as with any physical measurement there are uncertainties involved that lead to a variation in predictions. It is known that certain elements have influence on the tensile strength of steel it was hypothesized that the inclusion of these elements along with the IIT might help reduce the variance seen in some IIT measurements.
 
 ## IIT Only Model {-}
 The initial step this process was to review the IIT measurements relative to the destructive yield strength (YS). Although both the IIT and destructive yield strength have uncertainties, the destructive yield strength is considered the "truth" for all the analysis since the uncertainty is much less than the IIT. The plot of destructive YS vs. IIT is shown in Figure \@ref(fig:iit-only). The best fit line of the observations appear to have a slight bias to under-predicting as witnessed by the parallel offset to the 1:1 line.  The amount of under-prediction is more prominent in the higher YS values.
 
-```{r data_load}
+```{r data_load, message = FALSE}
 # compostion data ---------------------------------------------------------
 library(readxl)
 library(tidyverse)
@@ -94,7 +95,7 @@ ndt_ten_comp <- ndt %>%
 
 ```
 
-```{r iit-only, warning=TRUE, message=TRUE}
+```{r iit-only, fig.cap="IIT only Model"}
 
 ndt_ten_comp %>%
   # pivot_longer(cols = c(.fitted_iit, .fitted_comp)) %>%
@@ -125,7 +126,7 @@ lm_model <-
   set_mode("regression") %>%
   set_engine("lm")
 
-ys_iit_rec <- recipe(ten_ys ~ iitys_5 + mn + c+s ,
+ys_iit_rec <- recipe(ten_ys ~ iitys_5 + mn + c ,
                       data = ndt_ten_comp) %>%
   step_center(all_predictors()) %>%
   # step_scale(all_predictors()) %>%
@@ -158,7 +159,7 @@ ys_aug <- augment(fitted_iit$fit,interval = "prediction") %>%
 
 ```
  
-```{r iit-regress}
+```{r iit-regress, fig.cap="Regression Results"}
 ys_aug %>%
   # pivot_longer(cols = c(.fitted_iit, .fitted_comp)) %>%
   ggplot(aes(y = ten_ys, x = .fitted)) +
@@ -180,12 +181,12 @@ The model predicts an intercept of `r signif(tidy_iit$estimate[1],3)` and a slop
   
 The model has significant residuals at the higher predicted values. At a predicted yield of 70 ksi the confidence interval is between 57 and 83 ksi. This implies that there are other influences on the yield strength that are not included in the model and the $R^2$ value indicates that greater than 30% of the variance isn't accounted for by the model. This led to the investigation of other predictors that might be of use.  
 
-## Element Investigation  {-}
+## Element Investigation {-}
 In order for other predictors to be considered for augmenting the IIT model it needed to be correlated with the samples that the IIT measurement were taken from. The pool of data available for this is the element composition. Since certain elements are known to influence the YS of steel, the wt percent of several elements were used as predictors in addition to the IIT measurements. For consideration as a candidate for modeling, the element needed to be one that can be reliably be measured with NDE methods and be available throughout the range of pipeline steel grades and vintages. Some elements have significant impact on tensile strength but are difficult to measure with NDE or are only typically used in certain grades. An example of this would be Titanium which has a significant influence on YS but is typically only used in more modern high-grade steels. An example of other elements considered but eventually rejected was Phosphorus which has known effects but are difficult to measure accurately with NDE. 
   
 After several exploratory models it was decided that Manganese (Mn) and Carbon (C) had the characteristics of affecting the YS of steel and can be reliably measured with NDE methods. Figure \@ref(fig:residual-mnc) shows the model residuals (predicted minus observed) for the IIT only model versus Mn and C. There are noticeable trends in the residuals for both elements.
   
-```{r residual-mnc, fig.height=5}
+```{r residual-mnc, fig.cap="Residuals Plot for IIT Model", fig.width=6.5}
 mn_resid <- ys_aug %>% 
   bind_cols(mn =ndt_ten_comp$mn, c = ndt_ten_comp$c) %>% 
   ggplot(aes(mn, .resid))+
@@ -193,7 +194,8 @@ mn_resid <- ys_aug %>%
   geom_smooth(method = "lm", se=F)+
   labs(title = "Residuals vs. Mn Content",
        y = "Residuals",
-       x = "Mn (wt%)")
+       x = "Mn (wt%)")+
+  theme(plot.title = element_text(size=14))
   
 c_resid <- ys_aug %>% 
   bind_cols(mn =ndt_ten_comp$mn, c = ndt_ten_comp$c) %>% 
@@ -202,7 +204,8 @@ c_resid <- ys_aug %>%
   geom_smooth(method = "lm", se=F)+
   labs(title = "Residuals vs. C Content",
        y = "Residuals",
-       x = "C (wt%)")
+       x = "C (wt%)")+
+  theme(plot.title = element_text(size=14))
   
 mn_resid + c_resid +plot_annotation(caption = "IIT Only Model")
 
@@ -214,7 +217,7 @@ The relationship between Manganese and Carbon relative to the observed yield str
 
 Figure \@ref(fig:mnc-plot) shows the correlation between the two elements and yield strength but this should not be construed as causation. Carbon is used to increase ultimate tensile strength but since it does so at the expense of ductility and toughness the higher yield strength steels have lower Carbon content and use other elements to increase the strength. So it has a negative correlation to yield strength but indirectly so.  
 
-```{r mnc-plot}
+```{r mnc-plot, fig.cap="Ys vs. Mn and C"}
 ndt_ten_comp %>%
   pivot_longer(cols = mn:c) %>%
   ggplot(aes(value, ten_ys)) +
@@ -229,21 +232,55 @@ ndt_ten_comp %>%
   geom_smooth(method = "lm", se = F) +
   labs(title = "Correlation of Mn & C to YS",
        x="wt% - log scale",
-       y = "Destructive YS (ksi)")
+       y = "Destructive YS (ksi)")+
   scale_x_log10()
 
 
 ```
   
-## Model with Composition  
-This next section will present the results of the model with the IIT predicted yield strength along with Mn and C as additional predictors. Since it is known that the affect on YS of Mn and C the model needs to account for this. This is done through the interaction term of Mn times C.  When you include interaction between terms it creates a multicolinearity where one or more of the predictors are correlated to other predictors. Therefore the inclusion of this interaction term will create a correlation that violates the assumptions for the linear model and can create instability of the coeficent estimates. The counteraction to this problem is to center the data. This is done by subtracting the mean of each of the predictors. This method removes the multicollinearity produced by interaction, but it has the added benefit of not changing the interpretation of the coefficients. If you subtract the mean, each coefficient continues to estimate the change in the mean response per unit increase in *X* when all other predictors are held constant and the intercept is interpreted as teh predicted value when all the independent varibales are at their average.  
-
-```{r fitted2}
+## Model with Composition {-}
+This next section will present the results of the model with the IIT predicted yield strength along with Mn and C content as additional predictors. Since it is known that the affect on YS of Mn and C is not constant as shown in Figure \@ref(fig:mnc-plot) the model needs to account for this. This is done through the interaction term of Mn times C. 
+  
+The results of this model are shown in Figure \@ref(fig:fitted2).  
+```{r fitted2, fig.cap="IIT + Compostion Model"}
 fitted2 <-  fit(lm_model,
                 formula = ten_ys ~ iitys_5 + mn * c  ,
                 data = ys_bake) 
 
+ys2_glance <- glance(fitted2$fit)
+ys_aug2 <- augment(fitted2$fit,interval = "prediction") %>%
+  mutate(model="IIT + Comp")
 
+ys_aug2 %>%
+  # pivot_longer(cols = c(.fitted_iit, .fitted_comp)) %>%
+  ggplot(aes(y = ten_ys, x = .fitted)) +
+  geom_jitter(width = 0.1, 
+              height = 0.1,
+              alpha = 0.65, 
+              col = 'midnightblue') +
+  coord_obs_pred() +
+  geom_abline(lty = 2, col = 'grey50') +
+  geom_smooth(method = "lm", se = T, col='orange') +
+  scale_color_brewer(type = "div", palette = "Set1") +
+  labs(title = "IIT + Compostion Model",
+       x = "Predicted Tensile (ksi)",
+       y = "Observed Tensile (ksi)",
+       caption = "YS ~ IIT + Mn + C + Mn * C")
+  
 
 ```
 
+The significant residuals at the higher yield strengths has largely counteracted and the $R^2$ has increased from `r signif(iit_glance$adj.r.squared,3)` to `r signif(ys2_glance$adj.r.squared,3)`. Figure \@ref(fig:resid-plot) is a plot of the residuals (obsrved minus predicted) for both models with a loess smoothed line. The loess smoother is localized regression that shows the change in trend throughout the range of the data set.  The IIT + composition model has a far more stable pattern of residuals with the average at or near zero through about 70 ksi. This means that the predictions are roughly equal in the tendency to over as well as under predict the destructive YS and that there isn't a bias throughout the model's range. Whereas the "IIT only" model demonstrates different biases at different parts of the range swinging from positive to negative at different locations.
+  
+```{r resid-plot, fig.cap="Comparison Plot of Residuals"}
+
+bind_rows(ys_aug, ys_aug2) %>% 
+  ggplot(aes(.fitted, .resid))+
+  geom_point(aes(col=model))+
+  geom_smooth(method = "loess", se=F, aes(col=model))+
+  scale_color_brewer(type = "div", palette = "Set1")
+
+```
+
+## Conclusion {-}
+The IIT measurements combined with the composition remove the bias out of the IIT only model and significantly reduces the variance in the residuals to make a superior model.  In addition since the Mn and C can both be reliably measured with NDE they make excellent additional predictors and should be used to adjust IIT predictions.
