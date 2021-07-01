@@ -8,14 +8,18 @@ output: bookdown::word_document2
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, fig.align = "center")
 ```
 
-## Introduction {-}
-The purpose of this document is to compare the yield strength predictions using Instrumented Indentation Testing (IIT) by itself with IIT combined with composition elements as additional predictors. IIT works by making repeated measurements of the force and displacement of a indenter on the surface of the pipe to arrive at a stress - strain relationship for the steel and calculate a yield and ultimate strength. But as with any physical measurement there are uncertainties involved that lead to a variation in predictions. It is known that certain elements have influence on the tensile strength of steel it was hypothesized that the inclusion of these elements along with the IIT might help reduce the variance seen in some IIT measurements.
+## Executive Summary {-}
+The intent of this to study is to compare the yield strength predictions using Instrumented Indentation Testing (IIT) by itself and IIT combined with composition elements as additional predictors. IIT follows a known stress-strain relationship but like physical measurement there are uncertainties involved that lead to a variation in predictions. Since these predictions are being used to make judgements about the suitability of MAOP for unknown materials, it is desirable to reduce this model variance to a minimum. As part of this model improvement process it was hypothesized that the inclusion of certain elements that are known to have influence on yield strength as additional predictors could be beneficial.
+
+By including Manganese and Carbon as additional predictors increased the $R^2$ from a 0.67 to 0.81 and more importantly reduced the standard deviation of the residuals by 25%
+
+This will explore the yield strength predictions from IIT testing used by itself and IIT combined with different composition elements, specifically Manganese and Carbon.  The two models will be refered to as the IIT Only and the IIT + Composition.
 
 ## IIT Only Model {-}
-The initial step this process was to review the IIT measurements relative to the destructive yield strength (YS). Although both the IIT and destructive yield strength have uncertainties, the destructive yield strength is considered the "truth" for all the analysis since the uncertainty is much less than the IIT. The plot of destructive YS vs. IIT is shown in Figure \@ref(fig:iit-only). The best fit line of the observations appear to have a slight bias to under-predicting as witnessed by the parallel offset to the 1:1 line.  The amount of under-prediction is more prominent in the higher YS values.
+The initial step this process was to review the IIT measurements relative to the destructive yield strength (YS). Although both the IIT and destructive yield strength have uncertainties, the destructive yield strength is considered the "truth" for all the analysis since the uncertainty is much less than the IIT. The plot of destructive YS vs. IIT is shown in Figure \@ref(fig:iit-only). The best fit line of the observations appear to have a slight bias to under-predicting as witnessed by the parallel offset to the 1:1 line.  The amount of under-prediction is more prominent in the higher YS values. 
 
 ```{r data_load, message = FALSE}
 # compostion data ---------------------------------------------------------
@@ -26,7 +30,7 @@ library(performance)
 library(gtsummary)
 library(patchwork)
 
-theme_set(theme_bw(16, "serif"))
+theme_set(theme_bw(14, "serif"))
 
 comp <-
   read_excel("~/RSI/ChemistryGrade/MasterDB-SQL-2020-09-24.xlsx",
@@ -116,7 +120,7 @@ ndt_ten_comp %>%
 
 ```
   
-After the initial exploration of the IIT values vs YS, a regression model was fit to the data and the results plotted in Figure \@ref(fig:iit-regress). Although the regression line follows the 1:1 line there is still significant scatter to the data. Although the two plots are similar in appearance there are differences, Figure \@ref(fig:iit-only) is the actual IIT measurements and Figure \@ref(fig:iit-regress) is the predictions based on the regression analysis.  
+After the initial exploration of the IIT values vs YS, a regression model was fit to the data and the results plotted in Figure \@ref(fig:iit-regress). The regression model and plot of results show significant scatter to the data. Although the two plots are similar in appearance there are differences, Figure \@ref(fig:iit-only) is the actual IIT measurements without regression applied and Figure \@ref(fig:iit-regress) is the predictions based on the regression analysis. A single variable regression model will take the form of $y_i=\beta_0+\beta_1x_i +\epsilon_i$ where $\beta_0$ is the intercept term, $\beta_1$ is the slope of the regression line and $\epsilon_i$ is the normally distributed error term to account for the difference between the predicted and observed values. The gray shaded area around the regression line in Figure \@ref(fig:iit-regress) is the confidence interval for model. The confidence interval is a measure of the uncertainty in average prediction. A 95% confidence interval is the range that would cover the *average* prediction 95% of the time. The light blue shaded area is the prediction interval which represents the range that would cover an individual measurement 95% of the time.
   
 ```{r iit_only model, message=FALSE}
 
@@ -159,7 +163,22 @@ ys_aug <- augment(fitted_iit$fit,interval = "prediction") %>%
 
 ```
  
+The coefficients estimates and their uncertainties for the IIT only model are tabled below.  The standard error and confidence intervals reflect the uncertainties in the individual regression coefficients. The data was centered by subtracting the mean from the individual values before performing to remove any correlations and to make the intercept term more meaningful. Without centering the data the intercept of the IIT only model would represent the predicted YS when the IIT is zero which has no physical meaning. With centering, the intercept is interpreted as the predicted YS when the IIT is at the mean value and the slope coefficient is the relative change of the in the predicted value for an incremental change of one relative to the average IIT.
+
+```{r iit only coefs}
+tidy_iit %>% 
+  select(term, estimate, std.error, conf.low, conf.high) %>% 
+  mutate(across(.cols = all_numeric(), ~round(.x,3))) %>%
+  flextable::flextable() 
+
+```
+
+ 
 ```{r iit-regress, fig.cap="Regression Results"}
+corners <- ys_aug %>% 
+  summarise(x=c(min(.fitted),min(.fitted), max(.fitted),max(.fitted)), 
+            y = c(min(.lower),min(.upper),max(.upper), max(.lower))) 
+
 ys_aug %>%
   # pivot_longer(cols = c(.fitted_iit, .fitted_comp)) %>%
   ggplot(aes(y = ten_ys, x = .fitted)) +
@@ -170,6 +189,8 @@ ys_aug %>%
   coord_obs_pred() +
   geom_abline(lty = 2, col = 'grey50') +
   geom_smooth(method = "lm", se = T, col='orange') +
+   geom_polygon(aes(x=x,y=y), corners, fill='steelblue2', alpha=0.1)+
+  # geom_ribbon(aes(ymin = .lower, ymax=.upper), fill='steelblue2', alpha=0.2)+
   scale_color_brewer(type = "div", palette = "Set1") +
   labs(title = "IIT Only Model Observed vs. Predicted",
        x = "Predicted Tensile (ksi)",
@@ -182,9 +203,9 @@ The model predicts an intercept of `r signif(tidy_iit$estimate[1],3)` and a slop
 The model has significant residuals at the higher predicted values. At a predicted yield of 70 ksi the confidence interval is between 57 and 83 ksi. This implies that there are other influences on the yield strength that are not included in the model and the $R^2$ value indicates that greater than 30% of the variance isn't accounted for by the model. This led to the investigation of other predictors that might be of use.  
 
 ## Element Investigation {-}
-In order for other predictors to be considered for augmenting the IIT model it needed to be correlated with the samples that the IIT measurement were taken from. The pool of data available for this is the element composition. Since certain elements are known to influence the YS of steel, the wt percent of several elements were used as predictors in addition to the IIT measurements. For consideration as a candidate for modeling, the element needed to be one that can be reliably be measured with NDE methods and be available throughout the range of pipeline steel grades and vintages. Some elements have significant impact on tensile strength but are difficult to measure with NDE or are only typically used in certain grades. An example of this would be Titanium which has a significant influence on YS but is typically only used in more modern high-grade steels. An example of other elements considered but eventually rejected was Phosphorus which has known effects but are difficult to measure accurately with NDE. 
+In order for other predictors to be useful for augmenting the IIT model it needed to be correlated with the samples that the IIT measurement were taken from. The pool of data available for this is the element compositions in the ECA2 data set. Since certain elements are known to influence the YS of steel, the wt percent of several elements were used as predictors in addition to the IIT measurements. For consideration as a candidate for modeling, the element needed to be one that can be reliably be measured with NDE methods and be available throughout the range of pipeline steel grades and vintages. Some elements have significant impact on tensile strength but are difficult to measure with NDE or are only typically used in certain grades. An example of this would be Titanium which has a significant influence on YS but is typically only used in more modern high-grade steels. Another example of an element that was considered but eventually rejected was Phosphorus which has known effects but are difficult to measure accurately with NDE. 
   
-After several exploratory models it was decided that Manganese (Mn) and Carbon (C) had the characteristics of affecting the YS of steel and can be reliably measured with NDE methods. Figure \@ref(fig:residual-mnc) shows the model residuals (predicted minus observed) for the IIT only model versus Mn and C. There are noticeable trends in the residuals for both elements.
+After several exploratory models it was decided that Manganese (Mn) and Carbon (C) had the characteristics of significantly affecting the YS of steel and can be reliably measured with NDE methods. Figure \@ref(fig:residual-mnc) shows the model residuals (observed - predicted) for the IIT only model versus Mn and C. There are noticeable trends in the residuals for both elements.
   
 ```{r residual-mnc, fig.cap="Residuals Plot for IIT Model", fig.width=6.5}
 mn_resid <- ys_aug %>% 
@@ -212,7 +233,7 @@ mn_resid + c_resid +plot_annotation(caption = "IIT Only Model")
 
 ```
   
-## Element Affect on Yield Strength {-}  
+## Element Effect on Yield Strength {-}  
 The relationship between Manganese and Carbon relative to the observed yield strength will be examined next. This will plot the yield strength vs. the percent weight of Carbon and Manganese. This plot shows that additional Carbon or Manganese have opposite trends on the yield strength and therefore create what is called an interaction in a linear model meaning that the effect of one is not constant relative to the other. Because of this combined effect, the model will have an interaction term of Mn x C as well as the the contribution of Mn and C individually.  
 
 Figure \@ref(fig:mnc-plot) shows the correlation between the two elements and yield strength but this should not be construed as causation. Carbon is used to increase ultimate tensile strength but since it does so at the expense of ductility and toughness the higher yield strength steels have lower Carbon content and use other elements to increase the strength. So it has a negative correlation to yield strength but indirectly so.  
@@ -239,18 +260,27 @@ ndt_ten_comp %>%
 ```
   
 ## Model with Composition {-}
-This next section will present the results of the model with the IIT predicted yield strength along with Mn and C content as additional predictors. Since it is known that the affect on YS of Mn and C is not constant as shown in Figure \@ref(fig:mnc-plot) the model needs to account for this. This is done through the interaction term of Mn times C. 
+This next section will present the results of the model with the IIT predicted yield strength along with Mn and C content as additional predictors. Since it is known that the effect on YS of Mn and C is not constant as shown in Figure \@ref(fig:mnc-plot) the model needs to account for this. This is done through the interaction term of Mn times C. 
   
 The results of this model are shown in Figure \@ref(fig:fitted2).  
+  
 ```{r fitted2, fig.cap="IIT + Compostion Model"}
 fitted2 <-  fit(lm_model,
                 formula = ten_ys ~ iitys_5 + mn * c  ,
                 data = ys_bake) 
 
-ys2_glance <- glance(fitted2$fit)
+ys_glance2 <- glance(fitted2$fit)
+
+ys_tidy2 <- tidy(fitted2,conf.int=T) %>% 
+  mutate(model = "IIT + Comp")
+
 ys_aug2 <- augment(fitted2$fit,interval = "prediction") %>%
   mutate(model="IIT + Comp")
 
+corners2 <- ys_aug2 %>%
+  summarise(x = c(min(.fitted), min(.fitted), max(.fitted), max(.fitted)),
+            y = c(min(.lower), min(.upper), max(.upper), max(.lower))) 
+  
 ys_aug2 %>%
   # pivot_longer(cols = c(.fitted_iit, .fitted_comp)) %>%
   ggplot(aes(y = ten_ys, x = .fitted)) +
@@ -261,6 +291,8 @@ ys_aug2 %>%
   coord_obs_pred() +
   geom_abline(lty = 2, col = 'grey50') +
   geom_smooth(method = "lm", se = T, col='orange') +
+  # geom_ribbon(aes(ymin = .lower, ymax=.upper), fill='steelblue2', alpha=0.2)+
+  geom_polygon(aes(x=x,y=y), corners2, fill='steelblue2', alpha=0.2)+
   scale_color_brewer(type = "div", palette = "Set1") +
   labs(title = "IIT + Compostion Model",
        x = "Predicted Tensile (ksi)",
@@ -269,16 +301,117 @@ ys_aug2 %>%
   
 
 ```
-
-The significant residuals at the higher yield strengths has largely counteracted and the $R^2$ has increased from `r signif(iit_glance$adj.r.squared,3)` to `r signif(ys2_glance$adj.r.squared,3)`. Figure \@ref(fig:resid-plot) is a plot of the residuals (obsrved minus predicted) for both models with a loess smoothed line. The loess smoother is localized regression that shows the change in trend throughout the range of the data set.  The IIT + composition model has a far more stable pattern of residuals with the average at or near zero through about 70 ksi. This means that the predictions are roughly equal in the tendency to over as well as under predict the destructive YS and that there isn't a bias throughout the model's range. Whereas the "IIT only" model demonstrates different biases at different parts of the range swinging from positive to negative at different locations.
   
-```{r resid-plot, fig.cap="Comparison Plot of Residuals"}
+The significant residuals at the higher yield strengths of the IIT only model has largely been counteracted and the $R^2$ has increased from `r signif(iit_glance$adj.r.squared,3)` to `r signif(ys2_glance$adj.r.squared,3)`. Figure \@ref(fig:resid-plot) is a plot of the residuals (observed minus predicted) for both models with a loess smoothed line. The loess smoother is localized regression that shows the change in the trend throughout the range of the data set.  The IIT + composition model has a far more stable pattern of residuals with the average at or near zero through about 70 ksi. This means that the predictions are roughly equal in the tendency to over as well as under predict the destructive YS and that there isn't a bias throughout the model's range. Whereas the "IIT only" model demonstrates different biases at different parts of the range swinging from positive to negative at different locations. The residual pattern of the IIT + composition is more consistent with the assumptions for linear regression of normally distributed errors with a constant variance. 
+  
+```{r resid-plot, fig.width=6.5 ,fig.cap="Comparison Plot of Residuals"}
 
 bind_rows(ys_aug, ys_aug2) %>% 
   ggplot(aes(.fitted, .resid))+
   geom_point(aes(col=model))+
   geom_smooth(method = "loess", se=F, aes(col=model))+
-  scale_color_brewer(type = "div", palette = "Set1")
+  scale_color_brewer(type = "div", palette = "Set1")+
+  labs(title = "Model Residuals",
+       x = "Predicted",
+       y = "Residuals")
+
+```
+
+## Uncertainty {-}
+In order to test the model sensitivity to variations in the IIT and composition, 10,000 random samples were drawn from a normal distribution based on the mean and standard deviation of the NDE measurements.  Then this data was applied to the YS prediction model. The results are shown in Figure\@ref(fig:uncertain) which show that the variation in the predicted YS was about $\pm$ 7.5 ksi with the mean prediction off the destructive YS by approximately 2.5 ksi or 5% of the mean destructive tensile. This shows that the model does not produce large swings in predicted YS based on the typical variation in measurements for IIT and composition.
+
+```{r uncertain, fig.cap="Uncertainty in YS Predictions", cache=TRUE}
+
+c_m <- 0.268
+c_sd <- 0.024
+
+mn_m <- 0.594
+mn_sd <-  0.05
+
+
+iit_m <- 50.39
+iit_sd <- 6.22
+
+n <- 1e4
+
+tensile_mean <- mean(c(46.3,44.1,49.4,49.3,50.1,48.4))
+
+c <- rnorm(n = n,mean = c_m,sd = c_sd)
+
+mn <- rnorm(n,mean = mn_m, sd = mn_sd)
+
+iit <- rnorm(n, mean = iit_m,sd = iit_sd)
+
+avg <- bind_cols(c = c_m, mn = mn_m, iit = tensile_mean)
+
+dip <- tibble(c, mn, iit) %>%
+  bind_rows(avg) %>%
+  rename(iitys_5 = iit)
+
+# bake the predictors to use in fitted model
+dip_bake <- bake(ys_iit_rec, new_data = dip) 
+
+## Since this is being used for the RF model combine with non-scaled predictors
+ys_dip <- predict(fitted2,new_data = dip_bake) %>% 
+  bind_cols(dip) %>% 
+  rename(ys_ksi = .pred) %>% 
+  select(-iitys_5)
+
+## confidence interval of the predicted YS
+ys_up <- mean(ys_dip$ys_ksi) + qnorm(0.975) * sd(ys_dip$ys_ksi)
+ys_low <- mean(ys_dip$ys_ksi) - qnorm(0.975) * sd(ys_dip$ys_ksi) 
+
+## Plot Density
+ys_dip[-nrow(ys_dip),] %>%
+  ggplot(aes(ys_ksi)) +
+  geom_density(fill = 'royalblue2', alpha = 0.6) +
+  geom_vline(
+    xintercept = tensile_mean,
+    lty = 2,
+    lwd = 0.9,
+    col = 'red'
+  ) +
+  geom_errorbarh(aes(xmax = ys_up,
+                     xmin = ys_low,
+                     y = 0.01),
+                 height = 0.01,
+                 size = 1) +
+  geom_point(aes(x = mean(ys_dip$ys_ksi),
+                 y = 0.01),
+             size = 3) +
+  annotate(
+    "text",
+    x = tensile_mean,
+    y = 0.045,
+    label = "Destruct. Tensile Avg.",
+    angle = -90,
+    vjust = -0.5,
+    size = 4
+  ) +
+  annotate(
+    "text",
+    x = 50,
+    y = 0.01,
+    label = "95% Pred. Int.",
+    vjust = -0.6,
+    hjust = 0,
+    size = 4
+  ) +
+  labs(
+    title = "Predicted YS Uncertainty",
+    x = "Yield Strength (ksi)",
+    y = "Probability Density",
+    caption = "Pred. Int. = Prediction Interval"
+  ) +
+  scale_x_continuous(breaks = scales::pretty_breaks())
+
+```
+  
+The model sensitivity study looks at the uncertainty from the standpoint of that the model would not change with additional data and how the variation in the variables affect the predictions. The other form of uncertainty is the potential errors of the model itself and how that might change with additional data.  This is accounted for in the standard errors of the regression coefficients. These reflect the uncertainty in the coefficients based on the the data that the model was trained on.  The interaction term of Mn X C has the highest standard error because it is the product of two very small numbers, making small changes in either variable significant. Although the standard error of approximately 25 is large when compared to the others, the net effect is small since the 95% of the deviation from the average is less than $\pm$ 0.05.  This implies that if everything else was held constant, the uncertainty in the model would be about (0.05 x 25) 1.25 ksi.
+  
+```{r coef-table }
+
+flextable::flextable(tidy(fitted2)[,1:3])
 
 ```
 
