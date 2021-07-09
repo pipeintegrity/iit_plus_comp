@@ -8,15 +8,15 @@ output: bookdown::word_document2
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, fig.align = "center")
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, fig.align = 'center' )
 ```
 
 ## Executive Summary {-}
-The goal of this to study is to compare the yield strength (YS) predictions using Instrumented Indentation Testing (IIT) by itself and IIT combined with composition elements as additional predictors. IIT follows a known stress-strain relationship but like any physical measurement there are uncertainties involved that lead to a variation in predictions vs. the observed destructive YS. Since these predictions are being used to make judgements about the suitability of MAOP for unknown materials, it is desirable to reduce this model variance to a minimum. As part of this model improvement process it was hypothesized that the inclusion of certain elements that are known to have influence on yield strength as additional predictors could be beneficial.
+The goal of this to study is to compare the yield strength (YS) predictions using Instrumented Indentation Testing (IIT) by itself and IIT combined with composition elements as additional predictors. IIT follows a known stress-strain relationship but like any physical measurement there are uncertainties involved that lead to a variation in predictions vs. the observed destructive YS. Since these predictions are being used to make judgement about the suitability of MAOP for unknown materials, it is desirable to reduce this model variance to a minimum. As part of this model improvement process it was hypothesized that the inclusion of certain elements that are known to have influence on yield strength as additional predictors could be beneficial.
 
 After exploring several combinations of elements it was decided to include Mn and C as additional predictors. These additional factors increased the $R^2$ from a 0.67 to 0.81 and more importantly reduced the standard deviation of the residuals by 25%.
 
-This report will explore the YS predictions from IIT testing used by itself and IIT combined with different composition elements, specifically Mn (Mn) and Carbon (C).  The two models will be refered to as "IIT Only" and the "IIT + Composition".
+This report will explore the YS predictions from IIT testing used by itself and IIT combined with different composition elements, specifically Mn (Mn) and Carbon (C).  The two models will be referred to as "IIT Only" and the "IIT + Composition".
 
 ## Regression Analysis  {-}
 For this analysis, it was chosen to use least squares regression. Regression analysis was chosen because it is a robust technique and is the most interpretable of all machine learning techniques. Once the regression analysis is complete, the coefficients can be applied to new data without having to apply a machine learning model.
@@ -50,8 +50,19 @@ comp <-
              sheet = "Composition") %>%
   janitor::clean_names() %>%
   filter(skip == FALSE) %>%
-  select(group, feature,  mn, c) %>%
+  select(group, feature,  mn, c, si) %>%
   group_by(group, feature) %>%
+  mutate(across(.cols = mn:si, as.numeric)) %>%
+  summarise(across(.cols = mn:si, ~ mean(.x, na.rm = T))) %>%
+  ungroup()
+
+comp2 <- read_excel("~/RSI/ChemistryGrade/MasterDB-SQL-2020-09-24.xlsx",
+             sheet = "Composition") %>%
+  janitor::clean_names() %>%
+  filter(skip == FALSE) %>%
+  mutate(lab_nde = ifelse(vendor %in% lab,"lab","nde")) %>% 
+  select(group, feature,  mn, c, lab_nde) %>%
+  group_by(group, feature,lab_nde) %>%
   mutate(across(.cols = mn:c, as.numeric)) %>%
   summarise(across(.cols = mn:c, ~ mean(.x, na.rm = T))) %>%
   ungroup()
@@ -72,7 +83,7 @@ ndt <-
     reader_method == "DPT",
     vendor %in% c('ATS', 'TDW')
   ) %>%
-   mutate(lab_nde = ifelse(vendor %in% lab, "lab", "nde")) %>% 
+  mutate(lab_nde = ifelse(vendor %in% lab, "lab", "nde")) %>%
   group_by(group, feature) %>%
   summarise(
     iitys_5 = mean(x0_5_percent_eul_ys_ksi, na.rm = T),
@@ -180,11 +191,10 @@ ys_aug <- augment(fitted_iit$fit,interval = "prediction") %>%
 The coefficients estimates and their uncertainties for the IIT only model are in shown in Table \@ref(tab:iit-only-coefs).  The standard error and confidence intervals reflect the range of uncertainties in the individual regression coefficients. The data for this model had a linear transformation known as centering applied. Centering is the process of by subtracting the mean from the individual values before performing regression. This is done to make the intercept term more meaningful. Without centering the data, the intercept of the IIT only model would represent the predicted YS when the IIT is zero which has no physical meaning. After centering the data, the intercept is interpreted as the predicted YS when the IIT is at the mean value and the slope coefficient is the relative change of the in the predicted value for an incremental change of one relative to the mean IIT. This linear transformation has no affect on the $R^2$ values or the fit of the model. For the IIT only model, it was done to make the intercept and coefficients more interpretable but when composition is included it becomes necessary for other reasons that will be discussed in the section on the IIT + Composition model.
 
 ```{r iit-only-coefs}
-tab <- tidy_iit %>% 
+tidy_iit %>% 
   select(term, estimate, std.error, conf.low, conf.high) %>% 
-  mutate(across(.cols = all_numeric(), ~round(.x,3)))
-
-  knitr::kable(tab, caption = "Regression Estimates for IIT Only Model")
+  mutate(across(.cols = all_numeric(), ~round(.x,3))) %>% 
+  knitr::kable(caption = "Regression Estimates for IIT Only Model")
 
 ```
       
@@ -213,7 +223,7 @@ ys_aug %>%
        y = "Observed Tensile (ksi)")
 
 ```
-
+  
 The model has significant residuals at the higher predicted values. At a predicted yield of 70 ksi the range of residuals is between 57 and 83 ksi. This implies that there are other influences on the yield strength that are not included in the model and the $R^2$ value indicates that greater than 30% of the variance isn't accounted for by the model. This led to the investigation of other predictors that might be of use.  
 
 ## Motivation {-}
@@ -316,7 +326,97 @@ ys_aug2 %>%
 
 ```
   
-The estimates of the coefficients for this model and for comparison, the values for the IIT Only model are tabulated in Table \@ref(fig:iitpc-coefs) along with their uncertainties. The high and low confidence intervals reflect the 95% range of uncertainty for each variable.
+## Lab vs. NDE Composition  {-}
+In this next section, we will explore if the composition arrived at from a lab vs. NDE makes a difference in the model. To do this, the data was split by composition method and a nested model was created that evaluated the two groups of data in parallel. After fitting the model to the two sets of data the performance metrics were extracted and shown in Table \@ref(tab:nested-model). The difference in performance of the two models is not significantly different. The $R^2$ parameter is essentially the same and the standard deviation of the residuals (sigma) is slightly higher for the NDE. The NDE data set was about 15% smaller than the Lab data and if the uncertainty of the two standard deviations were accounted for the differences in the two are statistically indistinguishable from zero. To demonstrate this, a Bayesian simulation of the two models' residuals was undertaken and the results are shown in Figure  \@ref(fig:mcmc-sim).  Since the 95% credible interval of the differences in standard deviations includes zero it is can be judged that the differences seen in the model results are not significant enough to be able to say that they came from different populations, i.e. that the models are likely to produce statistically different populations of residuals based on this test data. That is not saying they are the same but only that it cannot be excluded that they are because the regions of uncertainty overlap.
+  
+A plot of the two models' predictions are shown in Figure \@ref(fig:lab-nde-plot). There are no identifiable visual trends in the two sets of predictions that make them significantly different.  
+  
+```{r nested-model}
+
+ndt_ten_comp2 <- ndt %>%
+  full_join(comp2,
+            by = c("group", "feature")) %>%
+  full_join(tensile,
+            by = c("group", "feature")) %>%
+  drop_na()
+
+ys_labnde_rec <- recipe(ten_ys ~ iitys_5 + mn + c ,
+                      data = ndt_ten_comp2) %>%
+  step_center(all_predictors()) %>%
+  # step_scale(all_predictors()) %>%
+  step_interact(terms = ~ mn:c ) %>%
+  prep()  #retain data =TRUE is default
+  
+
+labnde_bake <- bake(ys_labnde_rec,new_data = NULL) %>% 
+  bind_cols(lab_nde = ndt_ten_comp2$lab_nde)
+
+ys_lab_nde <- labnde_bake %>%
+  # select(CVN_US_FS, pdp, ags, c,s, mli, lab_nde) %>%
+  nest(c(-lab_nde)) %>%
+  mutate(fit = map(data, ~lm(ten_ys ~ iitys_5 + mn * c, data = .x)),
+         glanced = map(fit, glance),
+         tidied = map(fit, tidy),
+         aug = map(fit, augment)
+         )
+
+
+ys_lab_nde %>%
+  select(glanced) %>%
+  unnest(glanced) %>%
+  mutate(method=c("Lab", "NDE")) %>%
+  relocate(method) %>%
+  select(method:sigma,-p.value, deviance) %>%
+  mutate(across(.cols = c(2:5), ~ round(.x,2))) %>%
+  knitr::kable(digits = 2,
+               caption = "Lab vs. NDE Metrics")
+
+
+```
+  
+    
+```{r mcmc-sim, fig.width= 6.5, fig.cap = "MCMC Results", cache=TRUE}
+library(BEST)
+aug <- ys_lab_nde %>% unnest(aug)
+
+labnde_best <- BESTmcmc(aug$.resid[aug$lab_nde=="lab"], aug$.resid[aug$lab_nde=="nde"],numSavedSteps = 5e3)
+
+plotPost(labnde_best$sigma1 - labnde_best$sigma2, 
+         credMass = 0.95, 
+         compVal = 0, 
+         showCurve = FALSE, 
+         xlab = bquote(sigma[1] - sigma[2]), 
+         cex.lab = 1.75, 
+         main = "Difference of Std. Dev.s", 
+         col = "skyblue", 
+         showMode = TRUE)
+
+```
+
+  
+```{r lab-nde-plot, fig.cap="Lab vs. NDE Predictions"}
+ys_lab_nde %>% 
+  unnest(aug) %>% 
+  ggplot(aes(y = ten_ys, x = .fitted)) +
+  geom_jitter(width = 0.1, 
+              height = 0.1,
+              alpha = 0.65, 
+              aes(col = lab_nde)) +
+  coord_obs_pred() +
+  geom_abline(lty = 2, col = 'grey50') +
+  scale_color_brewer(type = "div", palette = "Set1") +
+  labs(title = "IIT + Compostion Model",
+       subtitle = "Split by Lab vs. NDE",
+       x = "Predicted Tensile (ksi)",
+       y = "Observed Tensile (ksi)",
+       caption = "YS ~ IIT + Mn + C + Mn * C",
+       col="Lab vs. NDE")
+  
+
+
+```
+
+The estimates of the coefficients for this model and for comparison, the values for the IIT Only model are tabulated in Table \@ref(tab:iitpc-coefs) along with their uncertainties. The high and low confidence intervals reflect the 95% range of uncertainty for each variable.
   
 ```{r iitpc-coefs}
 
@@ -367,9 +467,9 @@ tab <- bind_rows(iit_glance, ys_glance2) %>%
 ## Uncertainty {-}
 In order to test the sensitivity of the two proposed models to variations in the IIT and composition, 10,000 random samples were drawn from a normal distribution based on the mean and standard deviation of the NDE measurements for a single pipe sample.  Then this data was applied to the YS prediction models. The results are shown in Figure\@ref(fig:uncertain) which demonstrates that the variation in the predicted YS for the composition model was within about $\pm$ 7.5 ksi of the mean destructive YS and the average predicted value was within approximately 0.6 ksi which is about 1% of the YS. The IIT Only model shows significantly more spread and has a bias of approximately 4 ksi in the direction of overprediction. This shows that the IIT + composition model does not produce large swings in predicted YS based on the typical variation in measurements for IIT and composition and the mean value is centered on the destructive YS.
 
-Since these predictions are intended as inputs to a grade prediction machine learning model that also will use Mn and C as predictors, there is concern that there could be a propagation of uncertainty. To test this concern the values from this uncertainty analysis were used in the Random Forest Grade Prediction model and 88% of the samples came back with the same grade as the original data. In 9% of the cases it predicted one grade higher and 3% of the cases it predicted two grades higher. This demonstrates a very robust predictions from the grade prediction model given that 10,000 samples were drawn, some of the compositions were likely 3 standard deviations or more from the mean. These extreme composition samples are a very unlikely scenario in practice where multiple measurements are taken and aggregated. In addition, since the IIT + Compostion model gernerates more accurate YS predictions it is likely to improve the grade predictions over the IIT Only model.
+Since these predictions are intended as inputs to a grade prediction machine learning model that also will use Mn and C as predictors, there is concern that there could be a propagation of uncertainty. To test this concern the values from this uncertainty analysis were used in the Random Forest Grade Prediction model and 88% of the samples came back with the same grade as the original data. In 9% of the cases it predicted one grade higher and 3% of the cases it predicted two grades higher. This demonstrates a very robust predictions from the grade prediction model given that 10,000 samples were drawn, some of the compositions were likely 3 standard deviations or more from the mean. These extreme composition samples are a very unlikely scenario in practice where multiple measurements are taken and aggregated. In addition, since the IIT + Composition model generates more accurate YS predictions it is likely to improve the grade predictions over the IIT Only model.
 
-```{r uncertain, fig.cap="Uncertainty in YS Predictions", cache=TRUE}
+```{r uncertain, fig.cap="Uncertainty in YS Predictions", cache=TRUE, fig.width =6.5}
 
 c_m <- 0.268
 c_sd <- 0.024
@@ -456,9 +556,11 @@ ys_dip %>%
     title = "Predicted YS Uncertainty for Two Models",
     x = "Yield Strength (ksi)",
     y = "Probability Density",
+    fill="Model",
     # caption = "Pred. Int. = Prediction Interval"
   ) +
-  scale_x_continuous(breaks = scales::pretty_breaks())
+  scale_x_continuous(breaks = scales::pretty_breaks())+
+  theme(legend.position = c(0.80,0.75))
 
 ```
   
@@ -494,6 +596,7 @@ fit_model <- lm_workflow %>%
 
 ```
 
+
 ```{r train-testtab}
 fit_model %>%
   predict(test) %>% 
@@ -503,10 +606,38 @@ fit_model %>%
   knitr::kable(digits = 2, caption = "Test Set Regression Performance")
 
 ```
+  
+## Leave One Out Cross Validation {-}
+The training/test split is the standard way of evaluating a machine learning model but with this small of a data set, depending on the random split the performance metrics can have a large variance due to the small sample size. The more robust way to evaluate a regression model such as this would be with leave-one-out (LOO) cross validation. In this process, a Bayesian regression model is fit repeatedly equal to the number of data points. With each iteration one data point is excluded from the model and then the log-probability score is calculated. After all the models have been evaluated the scores are summed. This cross validation log score by itself is not predictive of model performance but is useful when comparing multiple models with different parameters such as this. An important thing to note in the interpretation of log scores is that they are based on the log of a probability which by definition is between zero and one, a log of a higher probability will produce a less negative number than a lower probability. Therefore a lower absolute value of the log score is desirable. 
 
+The LOO results for both models are shown in Table \@ref(tab:kfold-cv). elpd_loo is the estimated log score along with its standard error to show the uncertainty in the score. p_loo is effective number of parameters and looic is the LOO information criterion which is a measure of deviance of the model. The columns appended with _diff are the difference between the two models. After completing the cross validation comparison, the IIT Only model shows a log score that is more negative by over 21 indicating that the IIT + Composition model outperformed the IIT only model.
+
+```{r kfold-cv, cache=TRUE}
+library(rstanarm)
+options(mc.cores = parallel::detectCores())
+
+iit_only <- stan_glm(ten_ys ~ iitys_5,
+                     family = "gaussian",
+                     ys_bake)
+
+iit_comp <-
+  stan_glm(ten_ys ~ iitys_5 + mn * c,
+           family = "gaussian",
+           ys_bake)
+
+
+loo_iit <- loo(iit_only)
+
+loo_comp <- loo(iit_comp)
+
+knitr::kable(data.frame(loo_compare(loo_iit, loo_comp)), 
+             digits = 1,
+             caption = "LOO Cross Validation Results")
+
+```
   
 ## UTS Discussion {-}  
-A similar model for ultimatte tensile strength (UTS) was fit using the IIT measurement with Mn and C (but no the interaction). This is because C is postively correlated to UTS unlike YS negating the necessitiy of the interaction term. The metrics are shown in Table \@ref(tab:uts). The adjusted $R^2$ shows a slightly lower value than the YS model but still reasonably good give the uncertainty in several of the parameters.  It might be possible to find other elements that are suitable predictors but that is beyond the scope of this document.
+A similar model for ultimate tensile strength (UTS) was fit using the IIT measurement with Mn and C (but no the interaction). This is because C is positively correlated to UTS unlike YS negating the necessity of the interaction term. The metrics are shown in Table \@ref(tab:uts). The adjusted $R^2$ shows a slightly lower value than the YS model but still reasonably good give the uncertainty in several of the parameters.  It might be possible to find other elements that are suitable predictors but that is beyond the scope of this document.
 
 ```{r uts}
 uts_rec <- recipe(ten_uts ~ iitys_5 + mn + c ,
@@ -556,7 +687,60 @@ uts_aug %>%
   
 
 ```
+  
+## Future Work {-}  
+The inclusion of Mn and C show significant improvements over the IIT Only model. In addition, the inclusion of microstructure is showing potential additional improvements. The subset of samples that have microstructure and composition is about half of the amount of data that was used in the IIT + Composition model. This reduced data set was used to fit a third model that included microstructure variable of mean linear intercept as well as composition.  The results show an $R^2$ of 0.91. Again this is with the caveat that it is fit using half the number of data points and the improvement in correlation could be due to the reduced number of points needed to fit. However, it does show some promise for improvement over the composition based model.
+  
+```{r ms-comp}
 
+MICRO <-
+  read_excel(
+    "C:\\Users\\Joel\\OneDrive - RSI Pipeline Solutions\\PGE\\charpy\\Microstructure_Report\\Microstructure_Data_Collection_Online_2021_01_05_S5CJ.xlsx",
+    sheet = "Collection2"
+  ) %>%
+  mutate(
+    Sample_Type = str_replace(Sample_Type, "-", "_"),
+    name = paste0(Group, " ", Feature),
+    Path = str_remove(string = Path, pattern = ".jpg"),
+    Path = str_remove(string = Path, pattern = ".tif")
+  ) %>% 
+  janitor::clean_names() %>% 
+  rename(mli = mean_linear_intercept,
+         pdp = pct_dark_phase) %>% 
+  group_by(group, feature) %>% 
+  summarise(mli = mean(mli, na.rm=T),
+            pdp = mean(pdp, na.rm=T))
+
+micro_nde_comp <- ndt %>%
+  full_join(comp,
+            by = c("group", "feature")) %>%
+  full_join(tensile,
+            by = c("group", "feature")) %>%
+  full_join(MICRO,
+            by = c("group", "feature")) %>%
+  drop_na()
+
+
+ys_rec <-
+  recipe(ten_ys ~ iitys_5+ c + mn + si + mli+pdp,
+         data = micro_nde_comp) %>%
+  step_center(all_predictors()) %>%
+  # step_scale(all_predictors()) %>%
+  step_interact(terms = ~ c(mn:c, c:si, si:mli)) %>%
+  prep() #retain data =TRUE is default
+
+ys_bake <- bake(ys_rec, new_data = NULL)
+
+# fit the model
+fitted_mli <-  fit(lm_model,
+                 formula = ten_ys ~ iitys_5 + mn *c+si:mli ,
+                 data = ys_bake)
+
+glance(fitted_mli) %>%
+  select(r.squared, adj.r.squared, sigma, deviance) %>% 
+  knitr::kable(digits = 2, caption = "YS Model With Mean Linear Intercept")
+
+```
 
 
 ## Conclusion {-}
@@ -567,14 +751,14 @@ In addition since the Mn and C can both be reliably measured with NDE they make 
 ## Appendix {-}
 The IIT Only model shows deviance from a normal distribution in the far right tails as shown in Figure \@ref(fig:modelsum-iit) as well as some heterogeneity of the variance as well.  
   
-```{r modelsum-iit, fig.cap="IIT Only Diagnostics", fig.width=6.5}
+```{r modelsum-iit, fig.cap="IIT Only Diagnostics", fig.height=6, fig.width=6.5}
 
 check_model(fitted_iit)
 
 ```
   
 The variance of the IIT + Composition model follows a normal distribution and a more uniform distribution of residuals which is more consistent with the regression assumptions.  
-```{r modelsum-comp,fig.cap = "IIT + Composition Diagnostics" , fig.width=6.5}
+```{r modelsum-comp,fig.cap = "IIT + Composition Diagnostics" , fig.height=8.5, fig.width=6.5}
 
 check_model(fitted2)
 ```
